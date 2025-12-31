@@ -25,7 +25,7 @@ class OmnidirectionalAgent:
         self.active_hypotheses: Dict[str, Hypothesis] = {}
         self.seen_descriptions: Set[str] = set() 
         self.iteration = 0
-        self.max_per_iter = 4
+        self.max_per_iter = 8  # Increased from 4 for better coverage
         self.curiosity = CuriosityScorer()
 
         # Shared or new CLIP handles
@@ -33,18 +33,87 @@ class OmnidirectionalAgent:
         self.clip_model = clip_model
         self.clip_processor = clip_processor
         
-        # Expanded prompt bank with finer-grained specificity
+        # Comprehensive prompt bank for general image understanding
         self.prompt_bank = [
-            "a photo of a Rubik's cube", "a solved Rubik's cube", "a scrambled Rubik's cube",
-            "a fully solved Rubik's cube with solid color faces",
-            "a partially scrambled Rubik's cube",
-            "a close-up of a 3x3 Rubik's cube on a table",
-            "colorful plastic cube toy", "a 3x3 twisty puzzle",
-            "sharp geometric edges", "high contrast colored squares", "symmetric pattern",
-            "shadows indicating 3D depth", "plastic object with stickers",
-            "a table corner", "cardboard box", "furniture edge",
-            "wooden surface", "indoor lighting", "close-up of patterned object",
-            "central object is a puzzle", "background is a plain surface"
+            # Geometric shapes and patterns
+            "a circle", "a square", "a triangle", "a rectangle", "an oval",
+            "a blue circle", "a red square", "a green triangle",
+            "geometric shapes", "abstract pattern", "grid pattern",
+            "striped pattern", "checkerboard pattern", "dotted pattern",
+            
+            # Common objects
+            "a cube", "a sphere", "a cylinder", "a pyramid",
+            "a Rubik's cube", "a scrambled Rubik's cube", "a solved Rubik's cube",
+            "a puzzle", "a toy", "a game piece",
+            "a book", "a phone", "a laptop", "a keyboard", "a mouse",
+            "a cup", "a mug", "a glass", "a bottle", "a plate",
+            "a pen", "a pencil", "a marker", "a notebook",
+            "a chair", "a table", "furniture", "a desk",
+            "a car", "a bicycle", "a vehicle", "transportation",
+            
+            # Animals
+            "a dog", "a cat", "a bird", "a fish", "an animal",
+            "a pet", "wildlife", "an insect",
+            
+            # Nature
+            "a tree", "a flower", "a plant", "grass", "leaves",
+            "a landscape", "a mountain", "the ocean", "a beach",
+            "the sky", "clouds", "sunset", "sunrise",
+            "water", "a river", "a lake",
+            
+            # People and body parts
+            "a person", "a face", "people", "a crowd",
+            "a hand", "hands", "eyes", "a smile",
+            
+            # Food
+            "food", "a fruit", "vegetables", "a meal",
+            "an apple", "a banana", "an orange",
+            "bread", "pizza", "a sandwich",
+            
+            # Colors and materials
+            "blue", "red", "green", "yellow", "orange", "purple",
+            "black and white", "colorful", "monochrome",
+            "metal object", "wooden object", "plastic object",
+            "glass", "fabric", "paper",
+            
+            # Scenes and environments  
+            "indoor scene", "outdoor scene", "a room", "an office",
+            "a kitchen", "a bedroom", "a bathroom",
+            "a street", "a city", "urban environment",
+            "nature scene", "forest", "park",
+            "a building", "architecture", "a house",
+            
+            # Art and design
+            "artwork", "a painting", "a drawing", "a sketch",
+            "a photograph", "minimalist design", "modern design",
+            "typography", "text", "letters", "numbers",
+            "a logo", "an icon", "a symbol",
+            
+            # Abstract concepts
+            "abstract art", "blurred image", "bokeh effect",
+            "bright lighting", "dark shadows", "high contrast",
+            "texture", "smooth surface", "rough surface",
+            "symmetrical", "asymmetrical", "centered composition",
+            
+            # Specific details
+            "a table corner", "wooden surface", "plain background",
+            "white background", "dark background",
+            "close-up shot", "wide angle shot", "macro photography",
+            "3D object", "flat design", "depth effect",
+            
+            # Technology and digital
+            "screenshot", "user interface", "website",
+            "digital art", "computer graphics", "icon set",
+            "diagram", "chart", "graph", "infographic",
+            
+            # Sports and activities  
+            "sports equipment", "a ball", "athletic activity",
+            "exercise", "outdoor activity",
+            
+            # Miscellaneous
+            "empty space", "blank canvas", "simple design",
+            "complex scene", "busy composition", "minimalist",
+            "vintage style", "modern style", "retro design"
         ]
         
         # Step 3: Cross-validation listener

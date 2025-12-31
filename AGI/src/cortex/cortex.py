@@ -43,8 +43,22 @@ class CLIPVisualCortex(VisualCortexBase):
         """
         Process an image file and return segmented embeddings.
         """
+        # Clear any cached computations to ensure fresh processing
+        if hasattr(torch.cuda, 'empty_cache'):
+            torch.cuda.empty_cache()
+        
+        # Clear model's cached states if any
+        self.model.eval()  # Ensure eval mode
+        
         image = Image.open(image_path).convert("RGB")
         embeddings, coords = self._extract_patch_embeddings(image)
+        
+        # Debug: Show embedding fingerprint to verify different images produce different embeddings
+        if embeddings:
+            import hashlib
+            first_emb_str = str(embeddings[0][:10])  # First 10 values of first embedding
+            emb_hash = hashlib.md5(first_emb_str.encode()).hexdigest()[:8]
+            print(f"[DEBUG] Embedding fingerprint: {emb_hash} (from {image_path})")
         
         segments = []
         import uuid
