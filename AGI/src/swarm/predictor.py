@@ -65,7 +65,43 @@ class ARCPredictor:
                 
                 current_grid = np.rot90(current_grid, k=k)
             
+            elif "pattern_continuation" in rule_lower:
+                if "horizontal" in rule_lower:
+                    current_grid = ARCPredictor.apply_pattern_continuation_horizontal(current_grid)
+                elif "vertical" in rule_lower:
+                    current_grid = ARCPredictor.apply_pattern_continuation_vertical(current_grid)
+                else:
+                    # Default to both if direction unspecified, or could make this specific
+                    current_grid = ARCPredictor.apply_pattern_continuation_horizontal(current_grid)
+                    current_grid = ARCPredictor.apply_pattern_continuation_vertical(current_grid)
+
             else:
                 logger.warning("sub_rule_not_implemented", rule=rule_lower)
                 
         return current_grid.tolist()
+
+    @staticmethod
+    def apply_pattern_continuation_horizontal(grid: np.ndarray) -> np.ndarray:
+        new_grid = grid.copy()
+        for i in range(new_grid.shape[0]):
+            row = new_grid[i]
+            last_color = 0
+            for j in range(new_grid.shape[1]):
+                if row[j] != 0:
+                    last_color = row[j]
+                elif last_color != 0:
+                    row[j] = last_color 
+        return new_grid
+
+    @staticmethod
+    def apply_pattern_continuation_vertical(grid: np.ndarray) -> np.ndarray:
+        new_grid = grid.copy()
+        for j in range(new_grid.shape[1]):
+            col = new_grid[:, j]
+            last_color = 0
+            for i in range(new_grid.shape[0]):
+                if col[i] != 0:
+                    last_color = col[i]
+                elif last_color != 0:
+                    col[i] = last_color
+        return new_grid

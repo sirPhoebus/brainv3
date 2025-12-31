@@ -38,7 +38,34 @@ class RuleMemory:
                         self.rules = data.get("rules", [])
                 except Exception as e:
                     logger.error("memory_load_failed", error=str(e))
+                except Exception as e:
+                    logger.error("memory_load_failed", error=str(e))
                     self.rules = []
+
+        # Load hints as high priority rules
+        hints_path = os.path.join(os.path.dirname(self.storage_path), "hints.json")
+        if os.path.exists(hints_path):
+             try:
+                with open(hints_path, 'r') as f:
+                    data = json.load(f)
+                    # hints.json usually has {"hint": "text", "timestamp": "..."}
+                    # We treat it as a single high-priority rule injection
+                    hint_text = data.get("hint")
+                    if hint_text:
+                        # Check if already exists to update or append
+                        for rule in self.rules:
+                            if rule["text"] == hint_text:
+                                rule["weight"] = 3.0 # Super high priority
+                                break
+                        else:
+                            self.rules.append({
+                                "text": hint_text,
+                                "weight": 3.0,
+                                "success_count": 0,
+                                "last_used": datetime.now().isoformat()
+                            })
+             except Exception as e:
+                logger.error("hints_load_failed", error=str(e))
                     
     def save(self):
         os.makedirs(os.path.dirname(self.storage_path), exist_ok=True)

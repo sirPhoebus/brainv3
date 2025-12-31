@@ -86,6 +86,20 @@ async def trigger_predict():
         except Exception as e:
             print(f"Error loading rules: {e}")
 
+    # 1.5 Load Hints from hints.json (High Priority)
+    HINTS_PATH = os.path.join(BASE_DIR, "data", "hints.json")
+    if os.path.exists(HINTS_PATH):
+        try:
+            with open(HINTS_PATH, "r") as f:
+                hint_data = json.load(f)
+                hint_text = hint_data.get("hint")
+                if hint_text:
+                     print(f"Loaded Hint as Rule: {hint_text}")
+                     # Prepend to check it first
+                     rules.insert(0, hint_text)
+        except Exception as e:
+             print(f"Error loading hints: {e}")
+
     # 2. Find Consensus Rule
     consensus_rule = None
     train_pairs = ACTIVE_TASK.get("train", [])
