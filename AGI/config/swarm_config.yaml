@@ -1,0 +1,15 @@
+swarm:
+  num_agents: 3
+  max_iterations: 20
+  convergence_threshold: 0.95
+  pruning_threshold: 0.3
+  max_hypotheses_keep: 50
+  agent_timeout_seconds: 5.0
+
+cortex:
+  model_name: "openai/clip-vit-base-patch32"
+  patch_size: 32
+
+curiosity:
+  novelty_bonus_weight: 0.1
+  base_score: 0.5

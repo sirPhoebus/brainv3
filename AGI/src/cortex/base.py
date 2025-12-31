@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import List, Any
 from AGI.src.bridge.schemas import VisualSegment
 
-class VisualCortex(ABC):
+class VisualCortexBase(ABC):
     """
     Abstract Base Class for input processing.
     """
@@ -10,7 +10,7 @@ class VisualCortex(ABC):
     @abstractmethod
     def process_input(self, data: Any) -> List[VisualSegment]:
         """
-        Process raw input data into a list of VisualSegment objects.
+        Process raw input data (e.g., image path) into a list of VisualSegment objects.
         """
         pass
 

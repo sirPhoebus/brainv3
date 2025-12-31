@@ -13,12 +13,24 @@ async def main():
     logger.info("starting_agi_system")
     
     # 1. Initialize Components
-    cortex = MockCortex()
+    # CLIPVisualCortex is exported as VisualCortex by default in AGI.src.cortex
+    cortex = MockCortex() # Defaulting to Mock for first test, then switch to real
     swarm = Swarm(num_agents=3)
     
     # 2. Process Input
-    raw_data = "Simulated visual input"
-    segments = cortex.process_input(raw_data)
+    # Use real image path if it exists, otherwise fallback to mock data via raw_data
+    import os
+    image_path = "AGI/examples/sample_image.png"
+    if os.path.exists(image_path):
+        logger.info("using_real_image", path=image_path)
+        # Switch to real cortex for the demo
+        from AGI.src.cortex import VisualCortex
+        cortex = VisualCortex()
+        segments = cortex.process_input(image_path)
+    else:
+        logger.warning("sample_image_not_found_using_mock", path=image_path)
+        raw_data = "Simulated visual input"
+        segments = cortex.process_input(raw_data)
     logger.info("input_processed", num_segments=len(segments))
     
     # 3. Translate to tokens via Bridge
