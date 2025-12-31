@@ -1,4 +1,4 @@
-from .cortex import CLIPVisualCortex, MockCortex
+from AGI.src.cortex.cortex import CLIPVisualCortex
 
-# Export CLIPVisualCortex as the default VisualCortex
+# Default to the real CLIP-based visual cortex implementation
 VisualCortex = CLIPVisualCortex

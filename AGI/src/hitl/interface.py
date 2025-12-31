@@ -13,7 +13,9 @@ class HITLInterface:
         """
         print("\n--- HITL Review Phase ---")
         for i, h in enumerate(hypotheses[:3]): # Show top 3
-            print(f"[{i}] Agent {h.agent_id}: {h.content} (Score: {h.score:.2f})")
+            print(f"[{i}] {h.content} (Score: {h.score:.2f})")
+            if h.evidence:
+                print(f"    Evidence: {', '.join(h.evidence[:2])}...")
             
         # Mocking human approval: boost the first one
         if hypotheses:

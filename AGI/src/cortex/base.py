@@ -1,22 +1,9 @@
 from abc import ABC, abstractmethod
-from typing import List, Any
+from typing import List
 from AGI.src.bridge.schemas import VisualSegment
 
 class VisualCortexBase(ABC):
-    """
-    Abstract Base Class for input processing.
-    """
-    
     @abstractmethod
-    def process_input(self, data: Any) -> List[VisualSegment]:
-        """
-        Process raw input data (e.g., image path) into a list of VisualSegment objects.
-        """
-        pass
-
-    @abstractmethod
-    def get_status(self) -> str:
-        """
-        Return the current status of the cortex.
-        """
+    def process(self, image_path: str) -> List[VisualSegment]:
+        """Process an image file and return segmented embeddings."""
         pass

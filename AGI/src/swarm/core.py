@@ -49,28 +49,30 @@ class Swarm:
             self.iteration_count = i
             logger.debug("iteration_step", step=i)
             
-            # 1. Propose Phase (Parallel with Timeouts)
-            tasks = [asyncio.wait_for(agent.propose_hypothesis(context=f"step_{i}"), timeout=self.timeout) 
+            # Step 1, 2, 3: Candidate Generation -> Self-Verify -> Publish (Cross-Val)
+            # Agents perform internal reasoning and publish candidates to the bus.
+            tasks = [asyncio.wait_for(agent.run_reasoning_step(context=f"sector_{i}"), timeout=self.timeout) 
                      for agent in self.agents]
             try:
+                # This gathers and triggers cross-validation listeners on the bus simultaneously
                 await asyncio.gather(*tasks)
             except asyncio.TimeoutError:
-                logger.warning("agent_timeout_during_proposal", step=i)
+                logger.warning("agent_timeout_during_reasoning", step=i)
             except Exception as e:
-                logger.error("agent_error_during_proposal", error=str(e))
+                logger.error("agent_unhandled_error", error=str(e))
                 
-            # 2. Cross-validation / Voting (Consensus)
-            # Hypotheses are already being added to global_hypotheses via the bus callback
-            
-            # 3. Verification Phase
+            # Step 4: Swarm-level Pruning and Strengthening
+            # Strengthen based on global consensus markers and merge similar findings
             self.global_hypotheses = SwarmVerifier.verify_consistency(self.global_hypotheses)
+            self.global_hypotheses = SwarmVerifier.merge_similar(self.global_hypotheses)
             self.global_hypotheses = SwarmVerifier.prune_conflicts(self.global_hypotheses)
             
+            # Additional cleanup (top K)
             self._prune_hypotheses()
             
-            # Check for early stopping (e.g., high consensus on top hypothesis)
+            # Step 5: Check for Early Consensus (Stop Iterating)
             if self._check_convergence():
-                logger.info("consensus_reached", step=i)
+                logger.info("consensus_reached", step=i, top_score=self.global_hypotheses[0].score)
                 break
                 
         return self._get_best_hypothesis()
