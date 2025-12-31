@@ -149,6 +149,7 @@ export default function App() {
   const [selectedColor, setSelectedColor] = useState(1);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [zoomedExample, setZoomedExample] = useState<any>(null);
+  const [humanGrid, setHumanGrid] = useState<number[][] | null>(null);
 
   const [reasoningState, setReasoningState] = useState<any>(null);
 
@@ -255,7 +256,7 @@ export default function App() {
       await fetch('http://localhost:8000/api/inject', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: knowledge })
+        body: JSON.stringify({ text: knowledge, human_grid: humanGrid })
       });
       setKnowledge('');
       alert("Knowledge Injected! Swarm will prioritize this in the next run.");
@@ -522,6 +523,39 @@ export default function App() {
                         reasoningState?.current_step < 4 ? "opacity-20 cursor-not-allowed grayscale" : "opacity-100 border-primary/20 ring-1 ring-primary/10"
                       )}
                     />
+
+                    {/* Step 4: Human Visual Solution Input */}
+                    {reasoningState?.current_step === 4 && (
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-black uppercase tracking-widest text-primary italic">Draw Correct Solution (Optional)</span>
+                          <button
+                            onClick={() => setHumanGrid(JSON.parse(JSON.stringify(reasoningState?.test_input || [])))}
+                            className="text-[9px] text-muted-foreground underline hover:text-white"
+                          >
+                            Reset to Input
+                          </button>
+                        </div>
+                        <div className="h-48 bg-black/40 rounded-xl border border-white/10 overflow-hidden relative">
+                          <GridVisualizer
+                            grid={humanGrid || reasoningState?.test_input || []}
+                            onPixelClick={(r, c) => {
+                              if (!humanGrid && reasoningState?.test_input) {
+                                // Initialize on first click
+                                const newGrid = JSON.parse(JSON.stringify(reasoningState.test_input));
+                                newGrid[r][c] = selectedColor;
+                                setHumanGrid(newGrid);
+                              } else if (humanGrid) {
+                                const newGrid = [...humanGrid];
+                                newGrid[r] = [...newGrid[r]];
+                                newGrid[r][c] = selectedColor;
+                                setHumanGrid(newGrid);
+                              }
+                            }}
+                          />
+                        </div>
+                      </div>
+                    )}
 
                     <div className="flex gap-3">
                       <button

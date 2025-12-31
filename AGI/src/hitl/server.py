@@ -28,6 +28,7 @@ PUZZLE_DIR = os.path.join(BASE_DIR, "puzzles")
 class KnowledgeInjection(BaseModel):
     text: str
     rule_id: str = None
+    human_grid: List[List[int]] = None
 
 class ARCTask(BaseModel):
     train: List[Dict[str, Any]]
@@ -79,10 +80,14 @@ async def trigger_predict():
         try:
             with open(MEMORY_PATH, "r") as f:
                 data = json.load(f)
-                if isinstance(data, dict): # Legacy format
+            with open(MEMORY_PATH, "r") as f:
+                data = json.load(f)
+                if "rules" in data and isinstance(data["rules"], list): 
+                    # New Schema: {"rules": [{"text":...}, ...]}
+                    rules = [r["text"] for r in data["rules"]]
+                elif isinstance(data, dict): 
+                    # Legacy Schema: {"rule_text": weight}
                     rules = list(data.keys())
-                else: # New schema
-                    rules = [r["text"] for r in data.get("rules", [])]
         except Exception as e:
             print(f"Error loading rules: {e}")
 
@@ -100,45 +105,99 @@ async def trigger_predict():
         except Exception as e:
              print(f"Error loading hints: {e}")
 
-    # 2. Find Consensus Rule
+    # 2. Prioritize Human Verified Consensus
     consensus_rule = None
     train_pairs = ACTIVE_TASK.get("train", [])
-    
-    for rule in rules:
-        is_consistent = True
-        for pair in train_pairs:
+    human_sol = ACTIVE_TASK.get("human_solution")
+
+    if human_sol:
+        print("Validating rules against Human Truth...")
+        for rule in rules:
             try:
-                # Apply rule to training input
-                pred = ARCPredictor.apply_rule(rule, pair["input"])
-                # Check exact match with training output
-                if pred != pair["output"]:
+                # Check if rule validates against Human Solution (Test Input -> Human Output)
+                # We still use train_pairs[0] as the pattern source
+                pred = ARCPredictor.apply_rule(rule, ACTIVE_TASK["test_input"], demo_pair=train_pairs[0])
+                if pred == human_sol:
+                    print(f"Rule verified by Human Solution: {rule}")
+                    consensus_rule = rule
+                    # Optionally we could also verify against train_pairs here to serve as "Sanity Check"
+                    # But human intent overrides all.
+                    break
+            except Exception as e:
+                continue
+    
+    # 2b. Standard Consensus (if no human solution or no rule matched it)
+    if not consensus_rule:
+        for rule in rules:
+            is_consistent = True
+            for pair in train_pairs:
+                try:
+                    # Apply rule to training input. 
+                    # We use the FIRST training example as the 'source' of the pattern to be consistent.
+                    pred = ARCPredictor.apply_rule(rule, pair["input"], demo_pair=train_pairs[0])
+                    
+                    # Check exact match with training output
+                    if pred != pair["output"]:
+                        is_consistent = False
+                        break
+                except Exception:
                     is_consistent = False
                     break
-            except Exception:
-                is_consistent = False
+            
+            if is_consistent and len(train_pairs) > 0:
+                consensus_rule = rule
                 break
-        
-        if is_consistent and len(train_pairs) > 0:
-            consensus_rule = rule
-            break
             
     # 3. Generate Prediction
     if consensus_rule and ACTIVE_TASK["test_input"]:
         print(f"Consensus Reached on Rule: {consensus_rule}")
-        final_grid = ARCPredictor.apply_rule(consensus_rule, ACTIVE_TASK["test_input"])
+        final_grid = ARCPredictor.apply_rule(consensus_rule, ACTIVE_TASK["test_input"], demo_pair=train_pairs[0])
         ACTIVE_TASK["last_prediction"] = final_grid
         ACTIVE_TASK["active_hypotheses"] = [
             {"hypothesis_id": "consensus_01", "content": consensus_rule, "score": 1.0, "evidence": ["all_train_pairs"]}
         ]
     else:
-        print("No consensus rule found. Fallback to mock.")
-        # Fallback (simple flip) if no rule matches
-        if ACTIVE_TASK["test_input"]:
-             grid = np.array(ACTIVE_TASK["test_input"])
-             ACTIVE_TASK["last_prediction"] = np.flipud(grid).tolist()
-             ACTIVE_TASK["active_hypotheses"] = [
-                {"hypothesis_id": "fallback_01", "content": "No consistent rule found in memory.", "score": 0.0, "evidence": []}
-             ]
+        # Check if we have a hint that we can force-execute
+        hint_applied = False
+        HINTS_PATH = os.path.join(BASE_DIR, "data", "hints.json")
+        if os.path.exists(HINTS_PATH) and ACTIVE_TASK["test_input"]:
+             try:
+                with open(HINTS_PATH, "r") as f:
+                    hint_data = json.load(f)
+                    hint_text = hint_data.get("hint")
+                    if hint_text:
+                        print(f"Force-executing Hint: {hint_text}")
+                        # Apply hint to test input
+                        final_grid = ARCPredictor.apply_rule(hint_text, ACTIVE_TASK["test_input"], demo_pair=train_pairs[0] if train_pairs else None)
+                        ACTIVE_TASK["last_prediction"] = final_grid
+                        ACTIVE_TASK["active_hypotheses"] = [
+                            {"hypothesis_id": "hint_force_01", "content": f"[Hint] {hint_text}", "score": 0.5, "evidence": ["user_hint_only"]}
+                        ]
+                        hint_applied = True
+             except Exception as e:
+                 print(f"Failed to force hint: {e}")
+
+        if not hint_applied:
+            print("No consensus rule found. Fallback to mock.")
+            # Fallback (simple flip) if no rule matches
+            if ACTIVE_TASK["test_input"]:
+                 grid = np.array(ACTIVE_TASK["test_input"])
+                 ACTIVE_TASK["last_prediction"] = np.flipud(grid).tolist()
+                 ACTIVE_TASK["active_hypotheses"] = [
+                    {"hypothesis_id": "fallback_01", "content": "No consistent rule found in memory.", "score": 0.0, "evidence": []}
+                 ]
+                 
+    # 4. Inject Human Truth if available
+    human_sol = ACTIVE_TASK.get("human_solution")
+    if human_sol:
+        ACTIVE_TASK["active_hypotheses"].insert(0, {
+            "hypothesis_id": "human_truth_01", 
+            "content": "Perfect Solution provided by Human Feedback.", 
+            "score": 1.0, 
+            "evidence": ["human_feedback", "ground_truth"]
+        })
+        # Override prediction visual
+        ACTIVE_TASK["last_prediction"] = human_sol
 
     return {"status": "success", "step": 3, "consensus": consensus_rule}
 
@@ -184,11 +243,20 @@ async def upload_task(task: ARCTask):
 @app.post("/api/inject")
 async def inject_knowledge(injection: KnowledgeInjection):
     print(f"Human Knowledge Injected: {injection.text}")
+    
+    if injection.human_grid:
+        print("Human solution grid received.")
+        ACTIVE_TASK["human_solution"] = injection.human_grid
+        
     # Here we would update a 'hints.json' or shared state thatSwarm reads
     hint_path = os.path.join(BASE_DIR, "data", "hints.json")
     with open(hint_path, "w") as f:
-        json.dump({"hint": injection.text, "timestamp": "now"}, f)
-    return {"status": "success", "message": "Knowledge injected into Swarm priority stream."}
+        data = {"hint": injection.text, "timestamp": "now"}
+        if injection.human_grid:
+            data["solution"] = injection.human_grid
+        json.dump(data, f)
+        
+    return {"status": "success", "message": "Knowledge and solution injected."}
 
 # Serve static files for ARC images
 if os.path.exists(EXAMPLE_DIR):
