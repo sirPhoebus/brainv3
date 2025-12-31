@@ -13,8 +13,11 @@ async def main():
     logger.info("starting_agi_system")
     
     # 1. Initialize Components
+    from AGI.src.cortex import VisualCortex
     cortex = VisualCortex() 
-    swarm = Swarm(num_agents=3)
+    swarm = Swarm(num_agents=3, 
+                  clip_model=getattr(cortex, 'model', None), 
+                  clip_processor=getattr(cortex, 'processor', None))
     
     # 2. Process Input
     import os
@@ -27,6 +30,7 @@ async def main():
         
     logger.info("processing_input", path=image_path)
     segments = cortex.process(image_path)
+
     logger.info("input_processed", num_segments=len(segments))
     
     # 3. Translate to tokens via Bridge

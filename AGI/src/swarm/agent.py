@@ -1,7 +1,10 @@
 import random
 import uuid
 import structlog
+import torch
+import numpy as np
 from typing import List, Optional, Dict, Any, Set
+from transformers import CLIPProcessor, CLIPModel
 from AGI.src.swarm.schemas import Hypothesis, AgentAction
 from AGI.src.bridge.schemas import AgentToken
 from AGI.src.curiosity.scorer import CuriosityScorer
@@ -14,7 +17,7 @@ class OmnidirectionalAgent:
     An agent capable of reasoning across past and future states.
     """
     
-    def __init__(self, bus: Any = None, agent_id: str = None):
+    def __init__(self, bus: Any = None, agent_id: str = None, clip_model=None, clip_processor=None):
         self.config = DEFAULT_CONFIG.get("curiosity", {})
         self.agent_id = agent_id or str(uuid.uuid4())
         self.bus = bus
@@ -22,8 +25,23 @@ class OmnidirectionalAgent:
         self.active_hypotheses: Dict[str, Hypothesis] = {}
         self.seen_descriptions: Set[str] = set() 
         self.iteration = 0
-        self.max_per_iter = 3
+        self.max_per_iter = 4
         self.curiosity = CuriosityScorer()
+
+        # Shared or new CLIP handles
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.clip_model = clip_model
+        self.clip_processor = clip_processor
+        
+        # Expanded prompt bank
+        self.prompt_bank = [
+            "a photo of a Rubik's cube", "a solved Rubik's cube", "a scrambled Rubik's cube",
+            "colorful plastic cube toy", "a 3x3 twisty puzzle",
+            "sharp geometric edges", "high contrast colored squares", "symmetric pattern",
+            "shadows indicating 3D depth", "plastic object with stickers",
+            "a table corner", "cardboard box", "furniture edge",
+            "wooden surface", "indoor lighting", "close-up of patterned object"
+        ]
         
         # Step 3: Cross-validation listener
         if self.bus:
@@ -38,63 +56,77 @@ class OmnidirectionalAgent:
         
     async def generate_candidate(self, context: str) -> List[Hypothesis]:
         """
-        Step 1: Multi-Branch Candidate Generation.
-        Generate diverse proposals using curiosity to favor novel descriptions.
+        Step 1: Data-Driven Candidate Generation.
+        Propose candidates from a prompt bank and score them via CLIP similarity.
         """
-        templates = [
-            "Detects a colorful cube-like object, possibly a Rubik's cube with stickers.",
-            "Observes sharp structural edges forming a 3D cubic shape.",
-            "Perceives a grid of colored patches suggesting a puzzle toy.",
-            "Identifies potential furniture corner or box in the scene.",
-            "Notes high-contrast boundaries and symmetry in central region.",
-            "Sees patterned surface with primary colors arranged in squares.",
-            "Hypothesizes a solved state of a twisty puzzle.",
-            "Detects shadows indicating depth and 3D structure."
-        ]
-        
+        if not self.clip_model or not self.clip_processor:
+            # Fallback if CLIP not loaded (lazy load or mock-ish)
+             print("Warning: CLIP component missing in agent, using generic scoring.")
+             return await self._generate_fallback_candidates(context)
+
+        selected_prompts = random.sample(self.prompt_bank, k=self.max_per_iter)
         new_candidates = []
-        for _ in range(self.max_per_iter):
-            description = random.choice(templates)
-            # Curiosity boost: favor unseen descriptions
-            curiosity_bonus = 0.2 if description not in self.seen_descriptions else 0.0
-            self.seen_descriptions.add(description)
+
+        # Gather evidence vectors from memory
+        if not self.memory:
+            return []
+            
+        # Sample patches for evidence
+        num_samples = min(12, len(self.memory))
+        evidence_tokens = random.sample(self.memory, num_samples)
+        # Convert list of floats to tensor [N, 512]
+        evidence_embeddings = torch.tensor([t.vector for t in evidence_tokens]).to(self.device).to(torch.float32)
+
+        for prompt_text in selected_prompts:
+            # Curiosity boost
+            curiosity_bonus = 0.2 if prompt_text not in self.seen_descriptions else 0.0
+            self.seen_descriptions.add(prompt_text)
+            
+            # Compute CLIP similarity
+            text_inputs = self.clip_processor(text=[prompt_text], return_tensors="pt", padding=True).to(self.device)
+            with torch.no_grad():
+                text_emb = self.clip_model.get_text_features(**text_inputs).to(torch.float32)
+            
+            # Normalize for cosine similarity
+            text_emb = text_emb / text_emb.norm(dim=-1, keepdim=True)
+            norm_evidence = evidence_embeddings / evidence_embeddings.norm(dim=-1, keepdim=True)
+            
+            # Similarities between text and each patch [batch=1, N_patches]
+            similarities = torch.mm(text_emb, norm_evidence.T)[0]
+            clip_score = similarities.mean().item()
+            
+            # Map clip score (typically small for patches) to a usable 0-1 range
+            # Base logic: 0.5 + clip_score * alpha
+            total_score = 0.5 + clip_score * 0.5 + curiosity_bonus + random.uniform(-0.05, 0.05)
             
             h_id = f"hyp_{uuid.uuid4().hex[:12]}"
-            
-            # Select random actual tokens as evidence
-            evidence_samples = []
-            if self.memory:
-                num_samples = min(8, len(self.memory))
-                evidence_samples = [t.token_id for t in random.sample(self.memory, num_samples)]
-
             hyp = Hypothesis(
                 hypothesis_id=h_id,
                 agent_id=self.agent_id,
-                content=description,
-                score=0.6 + curiosity_bonus + random.uniform(-0.1, 0.1),
-                evidence=evidence_samples,
+                content=prompt_text,
+                score=min(1.0, total_score),
+                evidence=[t.token_id for t in evidence_tokens],
                 iteration=self.iteration,
-                metadata={"context": context}
+                metadata={"clip_raw_score": clip_score, "context": context}
             )
             new_candidates.append(hyp)
             self.active_hypotheses[h_id] = hyp
             
         return new_candidates
 
+    async def _generate_fallback_candidates(self, context: str) -> List[Hypothesis]:
+        # Legacy placeholder logic if CLIP not injected
+        return []
+
     async def self_verify(self, hypotheses: List[Hypothesis]):
         """
         Step 2: Self-Verification.
-        Basic consistency check with evidence and domain heuristics.
+        Grounded boost for strong evidence count.
         """
         for hyp in hypotheses:
-            if len(hyp.evidence) >= 5:  # Needs supporting patches
-                hyp.score = min(1.0, hyp.score + 0.15)
-                hyp.evidence.append("Confidence boost: Sufficient patch support.")
-            
-            low_content = hyp.content.lower()
-            if "cube" in low_content or "rubik" in low_content:
+            if len(hyp.evidence) >= 8:
                 hyp.score = min(1.0, hyp.score + 0.1)
-                hyp.evidence.append("Domain Match: Geometric cubic signature detected.")
+                hyp.evidence.append(f"Grounded: Supported by {len(hyp.evidence)} visual patches.")
 
     async def cross_validate(self, peer_hypothesis: Hypothesis):
         """

@@ -15,12 +15,13 @@ class Swarm:
     Orchestrates a collection of agents to reach a consensus.
     """
     
-    def __init__(self, num_agents: int = None):
+    def __init__(self, num_agents: int = None, clip_model = None, clip_processor = None):
         self.config = DEFAULT_CONFIG.get("swarm", {})
         n_agents = num_agents or self.config.get("num_agents", 5)
         
         self.bus = MessageBus()
-        self.agents = [OmnidirectionalAgent(bus=self.bus) for _ in range(n_agents)]
+        self.agents = [OmnidirectionalAgent(bus=self.bus, clip_model=clip_model, clip_processor=clip_processor) 
+                       for _ in range(n_agents)]
         self.global_hypotheses: List[Hypothesis] = []
         self.iteration_count = 0
         self.max_iterations = self.config.get("max_iterations", 20)
