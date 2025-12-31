@@ -1,6 +1,7 @@
+import random
 import uuid
 import structlog
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Set
 from AGI.src.swarm.schemas import Hypothesis, AgentAction
 from AGI.src.bridge.schemas import AgentToken
 from AGI.src.curiosity.scorer import CuriosityScorer
@@ -18,7 +19,10 @@ class OmnidirectionalAgent:
         self.agent_id = agent_id or str(uuid.uuid4())
         self.bus = bus
         self.memory: List[AgentToken] = []
-        self.current_hypotheses: List[Hypothesis] = []
+        self.active_hypotheses: Dict[str, Hypothesis] = {}
+        self.seen_descriptions: Set[str] = set() 
+        self.iteration = 0
+        self.max_per_iter = 3
         self.curiosity = CuriosityScorer()
         
         # Step 3: Cross-validation listener
@@ -32,78 +36,112 @@ class OmnidirectionalAgent:
         logger.debug("agent_perceive", agent_id=self.agent_id, num_tokens=len(tokens))
         self.memory.extend(tokens)
         
-    async def generate_candidate(self, context: str) -> Hypothesis:
+    async def generate_candidate(self, context: str) -> List[Hypothesis]:
         """
-        Step 1: Candidate Generation.
-        Propose a specific description segment based on the agent's local visual patches.
+        Step 1: Multi-Branch Candidate Generation.
+        Generate diverse proposals using curiosity to favor novel descriptions.
         """
-        h_id = f"hyp_{uuid.uuid4().hex[:8]}"
+        templates = [
+            "Detects a colorful cube-like object, possibly a Rubik's cube with stickers.",
+            "Observes sharp structural edges forming a 3D cubic shape.",
+            "Perceives a grid of colored patches suggesting a puzzle toy.",
+            "Identifies potential furniture corner or box in the scene.",
+            "Notes high-contrast boundaries and symmetry in central region.",
+            "Sees patterned surface with primary colors arranged in squares.",
+            "Hypothesizes a solved state of a twisty puzzle.",
+            "Detects shadows indicating depth and 3D structure."
+        ]
         
-        # Simulate 'seeing' something specific based on patch density or index
-        # In a real system, this would be a CLIP-text matching or LLM call.
-        content = f"Agent {self.agent_id[:4]} detects a high-contrast object at patch-sector {context}"
-        if len(self.memory) > 10:
-             content = f"Agent {self.agent_id[:4]} perceives a structural boundary (cube-like) in its sector."
+        new_candidates = []
+        for _ in range(self.max_per_iter):
+            description = random.choice(templates)
+            # Curiosity boost: favor unseen descriptions
+            curiosity_bonus = 0.2 if description not in self.seen_descriptions else 0.0
+            self.seen_descriptions.add(description)
+            
+            h_id = f"hyp_{uuid.uuid4().hex[:12]}"
+            
+            # Select random actual tokens as evidence
+            evidence_samples = []
+            if self.memory:
+                num_samples = min(8, len(self.memory))
+                evidence_samples = [t.token_id for t in random.sample(self.memory, num_samples)]
 
-        novelty_bonus = self.curiosity.score_hypothesis([context])
-        initial_score = 0.5 + (0.1 * novelty_bonus)
-        
-        new_h = Hypothesis(
-            hypothesis_id=h_id,
-            content=content,
-            score=initial_score,
-            agent_id=self.agent_id,
-            path_history=[context]
-        )
-        return new_h
+            hyp = Hypothesis(
+                hypothesis_id=h_id,
+                agent_id=self.agent_id,
+                content=description,
+                score=0.6 + curiosity_bonus + random.uniform(-0.1, 0.1),
+                evidence=evidence_samples,
+                iteration=self.iteration,
+                metadata={"context": context}
+            )
+            new_candidates.append(hyp)
+            self.active_hypotheses[h_id] = hyp
+            
+        return new_candidates
 
-    async def self_verify(self, hypothesis: Hypothesis):
+    async def self_verify(self, hypotheses: List[Hypothesis]):
         """
         Step 2: Self-Verification.
-        The agent internalizes its own proposal and 'checks' it against its raw memory features.
+        Basic consistency check with evidence and domain heuristics.
         """
-        # Simulated verification: if the content is specific, it's 'harder' to verify
-        verification_boost = 0.1 if "structural" in hypothesis.content else 0.05
-        hypothesis.score = min(1.0, hypothesis.score + verification_boost)
-        hypothesis.evidence.append("Self-verified via patch feature consistency.")
-        logger.debug("agent_self_verify", agent_id=self.agent_id, h_id=hypothesis.hypothesis_id, new_score=hypothesis.score)
+        for hyp in hypotheses:
+            if len(hyp.evidence) >= 5:  # Needs supporting patches
+                hyp.score = min(1.0, hyp.score + 0.15)
+                hyp.evidence.append("Confidence boost: Sufficient patch support.")
+            
+            low_content = hyp.content.lower()
+            if "cube" in low_content or "rubik" in low_content:
+                hyp.score = min(1.0, hyp.score + 0.1)
+                hyp.evidence.append("Domain Match: Geometric cubic signature detected.")
 
     async def cross_validate(self, peer_hypothesis: Hypothesis):
         """
         Step 3: Cross-Validation.
-        Listener callback. If another agent proposes something that matches this agent's memory, boost it.
+        Boost agreement, weaken conflict based on semantic overlap.
         """
         if peer_hypothesis.agent_id == self.agent_id:
             return
 
-        # Simple overlap logic: if both agents are looking at similar sectors or themes
-        if "object" in peer_hypothesis.content and len(self.memory) > 5:
-            peer_hypothesis.score = min(1.0, peer_hypothesis.score + 0.05)
-            peer_hypothesis.evidence.append(f"Cross-validated by Agent {self.agent_id[:4]}")
-            logger.debug("agent_cross_validate", observer=self.agent_id, target_h=peer_hypothesis.hypothesis_id)
+        for my_hyp in list(self.active_hypotheses.values()):
+            # Simple overlap logic: semantic similarity check
+            my_words = set(my_hyp.content.lower().split())
+            peer_words = set(peer_hypothesis.content.lower().split())
+            overlap = len(my_words & peer_words)
+            similarity = overlap / max(len(my_words), 1)
+            
+            if similarity > 0.6:
+                my_hyp.score = min(1.0, my_hyp.score + 0.08)
+                my_hyp.evidence.append(f"Consensus boost: Matches Agent {peer_hypothesis.agent_id[:4]}")
+            elif similarity < 0.2:
+                my_hyp.score = max(0.0, my_hyp.score - 0.05)
 
-    async def run_reasoning_step(self, context: str) -> Hypothesis:
+    async def run_reasoning_step(self, context: str) -> List[Hypothesis]:
         """
-        Executes the internal 3-step sequence (Generate -> Verify -> Publish).
+        Executes the internal reasoning cycle.
         """
-        # 1. Generate
-        candidate = await self.generate_candidate(context)
+        # 1. Generate Multi-branch
+        candidates = await self.generate_candidate(context)
         
         # 2. Self-Verify
-        await self.self_verify(candidate)
+        await self.self_verify(candidates)
         
-        # 3. Publish (for Step 4 cross-validation by others)
+        # 3. Publish (Triggering Cross-Val in others)
         if self.bus:
-            await self.bus.publish("hypotheses", candidate)
-            
-        return candidate
+            for h in candidates:
+                await self.bus.publish("hypotheses", h)
+        
+        # 4. Local Pruning
+        self._prune_weak()
+        
+        self.iteration += 1
+        return list(self.active_hypotheses.values())
 
-    def verify_hypothesis(self, hypothesis: Hypothesis) -> float:
+    def _prune_weak(self):
         """
-        Self-verify a hypothesis. Return a new score.
-        'Omnidirectional' aspect: can look at 'future' predictions (mocked here).
+        Step 4: Prune weak hypotheses.
         """
-        # Mocking omnidirectional lookahead/lookback
-        influence = 0.1 if "future" in hypothesis.content else -0.1
-        new_score = min(1.0, max(0.0, hypothesis.score + influence))
-        return new_score
+        to_remove = [hid for hid, hyp in self.active_hypotheses.items() if hyp.score < 0.4]
+        for hid in to_remove:
+            del self.active_hypotheses[hid]

@@ -35,31 +35,35 @@ class SwarmVerifier:
     @staticmethod
     def merge_similar(hypotheses: List[Hypothesis]) -> List[Hypothesis]:
         """
-        Merge hypotheses that describe similar scene elements to prevent redundancy.
+        Merge hypotheses that share high similarity into a stronger candidate.
         """
         if len(hypotheses) < 2:
             return hypotheses
             
         merged = []
-        seen_content = set()
-        
-        # Sort by score so we keep the best versions
+        # Sort by score to keep best as bases
         sorted_h = sorted(hypotheses, key=lambda x: x.score, reverse=True)
         
         for h in sorted_h:
-            # Simple keyword-based similarity for prototype
-            content_key = h.content.split("detects")[-1].strip() if "detects" in h.content else h.content
-            if content_key in seen_content:
-                # Strengthen the existing one instead of adding new
-                for m in merged:
-                    if content_key in m.content:
-                        m.score = min(1.0, m.score + 0.02)
-                        m.evidence.append(f"Merged with redundant hypothesis from {h.agent_id[:4]}")
-                continue
+            is_redundant = False
+            for m in merged:
+                # Semantic similarity check
+                m_words = set(m.content.lower().split())
+                h_words = set(h.content.lower().split())
+                overlap = len(m_words & h_words)
+                similarity = overlap / max(len(m_words), 1)
+                
+                if similarity > 0.7:
+                    # Merge: Strenghten score and combine evidence
+                    m.score = min(1.0, m.score + 0.05)
+                    new_evidence = [e for e in h.evidence if e not in m.evidence]
+                    m.evidence.extend(new_evidence[:2]) # Keep evidence compact
+                    is_redundant = True
+                    break
             
-            merged.append(h)
-            seen_content.add(content_key)
-            
+            if not is_redundant:
+                merged.append(h)
+                
         return merged
 
     @staticmethod

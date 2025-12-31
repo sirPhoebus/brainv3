@@ -11,6 +11,7 @@ class Hypothesis(BaseModel):
     evidence: List[str] = Field(default_factory=list)
     path_history: List[str] = Field(default_factory=list)
     agent_id: str
+    iteration: int = 0
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 class AgentAction(BaseModel):

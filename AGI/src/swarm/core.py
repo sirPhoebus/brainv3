@@ -92,12 +92,29 @@ class Swarm:
 
     def _check_convergence(self) -> bool:
         """
-        Check if the swarm has converged on a solution.
+        Check if the swarm has converged.
+        Stop when >=80% of top hypotheses share high similarity or iterations hit max.
         """
-        if not self.global_hypotheses:
+        if len(self.global_hypotheses) < 5:
             return False
-        threshold = self.config.get("convergence_threshold", 0.95)
-        return self.global_hypotheses[0].score > threshold
+            
+        # Analyze top 10
+        top_candidates = self.global_hypotheses[:10]
+        consensus_count = 0
+        primary_words = set(top_candidates[0].content.lower().split())
+        
+        for h in top_candidates:
+            h_words = set(h.content.lower().split())
+            overlap = len(primary_words & h_words)
+            similarity = overlap / max(len(primary_words), 1)
+            if similarity > 0.7:
+                consensus_count += 1
+                
+        # Convergence if 80% of top group agrees
+        convergence_ratio = consensus_count / len(top_candidates)
+        threshold = self.config.get("convergence_threshold", 0.8)
+        
+        return convergence_ratio >= threshold or self.global_hypotheses[0].score > 0.98
 
     def _get_best_hypothesis(self) -> Hypothesis:
         if not self.global_hypotheses:
