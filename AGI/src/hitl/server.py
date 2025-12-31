@@ -71,6 +71,12 @@ async def get_reasoning_state():
 async def trigger_predict():
     from AGI.src.swarm.predictor import ARCPredictor
     
+    # Log current state for debugging
+    test_grid = ACTIVE_TASK.get("test_input")
+    if test_grid:
+        test_array = np.array(test_grid)
+        print(f"PREDICT: Using test_input with shape {test_array.shape}, hash={hash(str(test_grid))}, sample={test_grid[0][:5] if test_grid else 'None'}")
+    
     ACTIVE_TASK["current_step"] = 3
     ACTIVE_TASK["active_hypotheses"] = []
     
@@ -91,13 +97,27 @@ async def trigger_predict():
         except Exception as e:
             print(f"Error loading rules: {e}")
 
-    # 1.5 Load Hints from hints.json (High Priority)
+     # 1.5 Load Hints from hints.json (High Priority)
     HINTS_PATH = os.path.join(BASE_DIR, "data", "hints.json")
     if os.path.exists(HINTS_PATH):
         try:
             with open(HINTS_PATH, "r") as f:
                 hint_data = json.load(f)
                 hint_text = hint_data.get("hint")
+                human_grid = hint_data.get("solution") or hint_data.get("correct_grid")
+                
+                # IMMEDIATE TRUTH OVERRIDE
+                if human_grid:
+                    print("Found Human Truth in hints.json - OVERRIDING PREDICTION")
+                    ACTIVE_TASK["last_prediction"] = human_grid
+                    ACTIVE_TASK["active_hypotheses"] = [{
+                        "hypothesis_id": "human_truth_01", 
+                        "content": f"Perfect Solution provided by Human Feedback: {hint_text or 'Direct Grid'}", 
+                        "score": 1.0, 
+                        "evidence": ["human_feedback", "ground_truth", "hints_file"]
+                    }]
+                    return {"status": "success", "step": 3, "consensus": "Human Truth"}
+
                 if hint_text:
                      print(f"Loaded Hint as Rule: {hint_text}")
                      # Prepend to check it first
@@ -151,6 +171,7 @@ async def trigger_predict():
     # 3. Generate Prediction
     if consensus_rule and ACTIVE_TASK["test_input"]:
         print(f"Consensus Reached on Rule: {consensus_rule}")
+        print(f"Applying to test_input: shape={np.array(ACTIVE_TASK['test_input']).shape}")
         final_grid = ARCPredictor.apply_rule(consensus_rule, ACTIVE_TASK["test_input"], demo_pair=train_pairs[0])
         ACTIVE_TASK["last_prediction"] = final_grid
         ACTIVE_TASK["active_hypotheses"] = [
@@ -169,11 +190,17 @@ async def trigger_predict():
                         print(f"Force-executing Hint: {hint_text}")
                         # Apply hint to test input
                         final_grid = ARCPredictor.apply_rule(hint_text, ACTIVE_TASK["test_input"], demo_pair=train_pairs[0] if train_pairs else None)
-                        ACTIVE_TASK["last_prediction"] = final_grid
-                        ACTIVE_TASK["active_hypotheses"] = [
-                            {"hypothesis_id": "hint_force_01", "content": f"[Hint] {hint_text}", "score": 0.5, "evidence": ["user_hint_only"]}
-                        ]
-                        hint_applied = True
+                        
+                        # Only use hint result if it actually changed the grid
+                        if final_grid != ACTIVE_TASK["test_input"]:
+                            ACTIVE_TASK["last_prediction"] = final_grid
+                            ACTIVE_TASK["active_hypotheses"] = [
+                                {"hypothesis_id": "hint_force_01", "content": f"[Hint] {hint_text}", "score": 0.5, "evidence": ["user_hint_only"]}
+                            ]
+                            hint_applied = True
+                            print(f"Hint produced a valid transformation.")
+                        else:
+                            print(f"WARNING: Hint did not transform the grid. Likely causes: Pattern extraction failed (no objects found) or no valid fit locations.")
              except Exception as e:
                  print(f"Failed to force hint: {e}")
 

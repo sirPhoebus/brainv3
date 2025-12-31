@@ -1,34 +1,16 @@
 {
     "rules": [
         {
-            "text": "reflection: mirror the top half of the input to the bottom output",
+            "text": "shape pattern could fit at those positions",
+            "weight": 3.0,
+            "success_count": 0,
+            "last_used": "2025-12-31T18:37:16.318138"
+        },
+        {
+            "text": "shape pattern could fit at those positions, including gravity: move all objects to the bottom of the grid",
             "weight": 1.0,
             "success_count": 1,
-            "last_used": "2025-12-31"
-        },
-        {
-            "text": "reflection: mirror the left half of the input to the right output",
-            "weight": 1.0,
-            "success_count": 1,
-            "last_used": "2025-12-31"
-        },
-        {
-            "text": "reflection: vertical mirror across the center column",
-            "weight": 1.0,
-            "success_count": 0,
-            "last_used": null
-        },
-        {
-            "text": "reflection: horizontal mirror across the center row",
-            "weight": 1.0,
-            "success_count": 0,
-            "last_used": null
-        },
-        {
-            "text": "color_fill: fill all empty (0) cells with the most frequent non-black color",
-            "weight": 1.0,
-            "success_count": 0,
-            "last_used": null
+            "last_used": "2025-12-31T18:37:16.967168"
         }
     ]
 }

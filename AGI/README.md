@@ -32,8 +32,22 @@ A modular AI architecture designed for reasoning through an omnidirectional swar
 
 ### Running the System
 To run the end-to-end demonstration with real CLIP processing (from the project root):
+
+**Using the default image:**
 ```powershell
 .\AGI\.venv\Scripts\python -m AGI.src.main
+```
+
+**With a custom image path:**
+```powershell
+.\AGI\.venv\Scripts\python -m AGI.src.main --image-path path/to/your/image.png
+# Or using the short form:
+.\AGI\.venv\Scripts\python -m AGI.src.main -i path/to/your/image.png
+```
+
+**View help for all available options:**
+```powershell
+.\AGI\.venv\Scripts\python -m AGI.src.main --help
 ```
 
 ### Running Tests

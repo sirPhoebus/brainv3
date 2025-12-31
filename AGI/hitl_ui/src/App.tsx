@@ -241,7 +241,8 @@ export default function App() {
   };
 
   const handlePixelClick = async (r: number, c: number) => {
-    if (reasoningState.current_step !== 5) return;
+    // Allow editing at any time after task is loaded
+    if (reasoningState.current_step < 2) return;
     try {
       await fetch('http://localhost:8000/api/update_test_grid', {
         method: 'POST',
@@ -423,9 +424,9 @@ export default function App() {
                 <section className="col-span-12 lg:col-span-9 flex flex-col gap-6 min-h-0">
                   <div className="flex-1 grid grid-cols-2 gap-6 min-h-0">
                     <PredictionCard
-                      title="Challenge Input"
+                      title="Challenge Input (Editable)"
                       grid={reasoningState?.test_input}
-                      onPixelClick={reasoningState?.current_step === 5 ? handlePixelClick : undefined}
+                      onPixelClick={reasoningState?.current_step >= 2 ? handlePixelClick : undefined}
                     />
                     {reasoningState?.current_step >= 3 ? (
                       <PredictionCard
@@ -452,17 +453,25 @@ export default function App() {
                         onClick={handlePredict}
                         className="w-full py-6 bg-primary text-white rounded-2xl font-black flex items-center justify-center gap-4 hover:scale-[1.01] active:scale-95 transition-all shadow-[0_0_50px_-12px_rgba(var(--primary),0.5)] text-xl uppercase tracking-[0.2em] group"
                       >
-                        <Zap className="w-8 h-8 group-hover:animate-pulse" /> Invoke Swarm reasoning (Step 3)
+                        <Zap className="w-8 h-8 group-hover:animate-pulse" /> Invoke Swarm Reasoning
                       </button>
                     )}
 
-                    {reasoningState?.current_step === 3 && (
-                      <button
-                        onClick={() => setStep(4)}
-                        className="w-full py-6 bg-white text-black rounded-2xl font-black flex items-center justify-center gap-4 hover:scale-[1.01] active:scale-95 transition-all text-xl uppercase tracking-[0.2em]"
-                      >
-                        Proceed to Human Feedback (Step 4)
-                      </button>
+                    {reasoningState?.current_step >= 3 && (
+                      <div className="flex gap-4">
+                        <button
+                          onClick={handlePredict}
+                          className="flex-1 py-4 bg-primary/20 text-primary border-2 border-primary rounded-xl font-black flex items-center justify-center gap-2 hover:bg-primary hover:text-white transition-all text-sm uppercase tracking-[0.15em]"
+                        >
+                          <Zap className="w-5 h-5" /> Re-Run Prediction
+                        </button>
+                        <button
+                          onClick={() => setStep(4)}
+                          className="flex-1 py-4 bg-white text-black rounded-xl font-black flex items-center justify-center gap-2 hover:scale-[1.01] active:scale-95 transition-all text-sm uppercase tracking-[0.15em]"
+                        >
+                          Human Feedback
+                        </button>
+                      </div>
                     )}
 
                     {reasoningState?.current_step === 5 && (

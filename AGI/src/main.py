@@ -1,4 +1,5 @@
 import asyncio
+import argparse
 import structlog
 from AGI.src.bridge.protocol import Bridge
 from AGI.src.swarm.core import Swarm
@@ -9,7 +10,7 @@ from AGI.src.cortex import VisualCortex
 structlog.configure()
 logger = structlog.get_logger()
 
-async def main():
+async def main(image_path: str = "AGI/examples/arc_tasks/task_user_composite.png"):
     logger.info("starting_agi_system")
     
     # 1. Initialize Components
@@ -28,7 +29,6 @@ async def main():
     
     # 2. Process Input
     import os
-    image_path = "AGI/examples/arc_tasks/task_user_composite.png"
     if not os.path.exists(image_path):
         logger.warning("sample_image_not_found_using_mock", path=image_path)
         from AGI.src.cortex.mock import MockCortex
@@ -84,4 +84,17 @@ async def main():
         logger.error("no_hypothesis_found")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(
+        description="AGI System - ARC Task Solver with Visual Cortex and Swarm Reasoning"
+    )
+    parser.add_argument(
+        "--image-path", 
+        "-i", 
+        type=str, 
+        default="AGI/examples/arc_tasks/task_user_composite.png",
+        help="Path to the input image file (default: AGI/examples/arc_tasks/task_user_composite.png)"
+    )
+    
+    args = parser.parse_args()
+    asyncio.run(main(image_path=args.image_path))
+
