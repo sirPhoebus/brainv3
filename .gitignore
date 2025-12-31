@@ -152,3 +152,4 @@ cython_debug/
 
 # Project specific
 test_out.txt
+AGI/puzzles

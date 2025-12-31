@@ -8,6 +8,7 @@ from transformers import CLIPProcessor, CLIPModel
 from AGI.src.swarm.schemas import Hypothesis, AgentAction
 from AGI.src.bridge.schemas import AgentToken
 from AGI.src.curiosity.scorer import CuriosityScorer
+from AGI.src.swarm.predictor import ARCPredictor
 from AGI.src.config_loader import DEFAULT_CONFIG
 
 logger = structlog.get_logger()
@@ -17,10 +18,11 @@ class OmnidirectionalAgent:
     An agent capable of reasoning across past and future states.
     """
     
-    def __init__(self, bus: Any = None, agent_id: str = None, clip_model=None, clip_processor=None):
+    def __init__(self, bus: Any = None, agent_id: str = None, clip_model=None, clip_processor=None, task_data: Dict = None):
         self.config = DEFAULT_CONFIG.get("curiosity", {})
         self.agent_id = agent_id or str(uuid.uuid4())
         self.bus = bus
+        self.task_data = task_data
         self.memory: List[AgentToken] = []
         self.active_hypotheses: Dict[str, Hypothesis] = {}
         self.seen_descriptions: Set[str] = set() 
@@ -28,6 +30,10 @@ class OmnidirectionalAgent:
         self.max_per_iter = 4
         self.curiosity = CuriosityScorer()
 
+        # Rule Memory Integration
+        from AGI.src.swarm.memory import RuleMemory
+        self.rule_memory: Optional[RuleMemory] = None
+        
         # Shared or new CLIP handles
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.clip_model = clip_model
@@ -73,7 +79,37 @@ class OmnidirectionalAgent:
              print("Warning: CLIP component missing in agent, using generic scoring.")
              return await self._generate_fallback_candidates(context)
 
-        selected_prompts = random.sample(self.prompt_bank, k=self.max_per_iter)
+        selected_prompts = []
+        
+        if self.rule_memory:
+            # 50% from high-weight memory rules (top 10)
+            high_weight = self.rule_memory.get_weighted_rules(top_n=10)
+            if high_weight:
+                num_high = self.max_per_iter // 2
+                sampled_high = random.choices([r["text"] for r in high_weight], k=num_high)
+                selected_prompts.extend(sampled_high)
+            
+            # 20% rehearsal from low-weight memory rules
+            rehearsal = self.rule_memory.get_rehearsal_candidates(n=5)
+            if rehearsal:
+                num_rehearsal = max(1, self.max_per_iter // 5)
+                sampled_rehearsal = random.choices([r["text"] for r in rehearsal], k=num_rehearsal)
+                selected_prompts.extend(sampled_rehearsal)
+
+        # Fill/Add from standard bank (30% or whatever is left)
+        needed = self.max_per_iter - len(selected_prompts)
+        if needed > 0:
+            bank_samples = random.sample(self.prompt_bank, k=min(needed, len(self.prompt_bank)))
+            selected_prompts.extend(bank_samples)
+
+        # Final top-up if still under max
+        if len(selected_prompts) < self.max_per_iter:
+             extra = random.choices(self.prompt_bank, k=self.max_per_iter - len(selected_prompts))
+             selected_prompts.extend(extra)
+        
+        # Dedupe while preserving order
+        selected_prompts = list(dict.fromkeys(selected_prompts))[:self.max_per_iter]
+        
         new_candidates = []
 
         # Gather evidence vectors from memory
@@ -117,10 +153,14 @@ class OmnidirectionalAgent:
             
             # Apply spatial weights
             weighted_sim = (similarities * weights_tensor).sum() / weights_tensor.sum()
-            clip_score = weighted_sim.item()
+            # Mapping clip score to 0-1 range
+            # Memory boost: if rule was successful before, give it a head start
+            is_prior = False
+            if self.rule_memory:
+                 is_prior = any(r["text"] == prompt_text for r in self.rule_memory.rules)
             
-            # Map clip score to a usable 0-1 range
-            total_score = 0.5 + clip_score * 0.5 + curiosity_bonus + random.uniform(-0.05, 0.05)
+            memory_boost = 0.3 if is_prior else 0.0
+            total_score = 0.4 + weighted_sim.item() * 0.4 + curiosity_bonus + memory_boost + random.uniform(-0.05, 0.05)
             
             h_id = f"hyp_{uuid.uuid4().hex[:12]}"
             hyp = Hypothesis(
@@ -130,7 +170,7 @@ class OmnidirectionalAgent:
                 score=min(1.0, total_score),
                 evidence=[t.token_id for t in evidence_tokens],
                 iteration=self.iteration,
-                metadata={"clip_raw_score": clip_score, "context": context}
+                metadata={"clip_raw_score": weighted_sim.item(), "context": context}
             )
             new_candidates.append(hyp)
             self.active_hypotheses[h_id] = hyp
@@ -144,12 +184,28 @@ class OmnidirectionalAgent:
     async def self_verify(self, hypotheses: List[Hypothesis]):
         """
         Step 2: Self-Verification.
-        Grounded boost for strong evidence count.
+        Boost rules that correctly transform known demonstration pairs.
         """
         for hyp in hypotheses:
+            # Basic grounded boost
             if len(hyp.evidence) >= 8:
                 hyp.score = min(1.0, hyp.score + 0.1)
                 hyp.evidence.append(f"Grounded: Supported by {len(hyp.evidence)} visual patches.")
+
+            # Empirical boost if task_data is present
+            if self.task_data and "input" in self.task_data and "output" in self.task_data:
+                try:
+                    predicted = ARCPredictor.apply_rule(hyp.content, self.task_data["input"])
+                    if predicted == self.task_data["output"]:
+                        hyp.score = min(1.0, hyp.score + 0.5) # Massive boost for correctness
+                        hyp.evidence.append("Empirical Match: Rule correctly transforms input to output.")
+                    else:
+                        # Slight penalty for incorrect execution if we are sure of the mapping
+                        # but be careful with DSL limitations
+                        pass
+                except Exception as e:
+                    # If rule can't be executed yet, no boost or penalty
+                    pass
 
     async def cross_validate(self, peer_hypothesis: Hypothesis):
         """

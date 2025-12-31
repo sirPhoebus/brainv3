@@ -52,6 +52,12 @@ def render_task_pairs(task, output_dir, task_id="arc_sample"):
     print(f"Saved ARC composite to {path}")
     return path
 
+def save_prediction(grid, output_path):
+    """Save a predicted ARC grid to an image file."""
+    img = render_grid(grid)
+    img.save(output_path)
+    print(f"Saved ARC prediction to {output_path}")
+
 if __name__ == "__main__":
     # Example task from user
     task_example = {

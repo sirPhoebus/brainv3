@@ -19,22 +19,42 @@ class Swarm:
     Orchestrates a collection of agents to reach a consensus.
     """
     
-    def __init__(self, num_agents: int = None, clip_model = None, clip_processor = None):
+    def __init__(self, num_agents: int = None, clip_model = None, clip_processor = None, task_data: Dict = None):
         self.config = DEFAULT_CONFIG.get("swarm", {})
         n_agents = num_agents or self.config.get("num_agents", 5)
+        self.task_data = task_data
         
         self.bus = MessageBus()
         self.rule_memory = RuleMemory()
         
         # Pull rules from memory to bias agents
-        top_rules = self.rule_memory.get_top_rules()
         self.agents = [OmnidirectionalAgent(bus=self.bus, 
                                             clip_model=clip_model, 
-                                            clip_processor=clip_processor) 
+                                            clip_processor=clip_processor,
+                                            task_data=task_data) 
                        for _ in range(n_agents)]
         
-        # Inject known rules into agent prompt banks
+        # Inject known rules and memory instance
+        top_rules = self.rule_memory.get_top_rules()
+        
+        # Load human hints
+        hints = []
+        hint_path = "AGI/data/hints.json"
+        if os.path.exists(hint_path):
+            try:
+                with open(hint_path, 'r') as f:
+                    data = json.load(f)
+                    hints.append(data.get("hint", ""))
+            except:
+                pass
+
         for agent in self.agents:
+            agent.rule_memory = self.rule_memory
+            # Hints get top priority
+            for hint in hints:
+                if hint:
+                    agent.prompt_bank.insert(0, hint)
+            
             for rule in top_rules:
                 if rule not in agent.prompt_bank:
                     agent.prompt_bank.append(rule)
@@ -93,6 +113,10 @@ class Swarm:
                 logger.info("consensus_reached", step=i, top_score=self.global_hypotheses[0].score)
                 break
                 
+        # Memory Decay: Rules not proposed in this run decay slightly
+        proposed_rules = [h.content for h in self.global_hypotheses]
+        self.rule_memory.decay_unused(proposed_rules)
+
         # Final Refinement: Global alignment and Synthesis
         final_h = await self._synthesize_final_hypothesis(input_tokens)
         
