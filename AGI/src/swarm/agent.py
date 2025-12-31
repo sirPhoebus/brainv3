@@ -33,14 +33,18 @@ class OmnidirectionalAgent:
         self.clip_model = clip_model
         self.clip_processor = clip_processor
         
-        # Expanded prompt bank
+        # Expanded prompt bank with finer-grained specificity
         self.prompt_bank = [
             "a photo of a Rubik's cube", "a solved Rubik's cube", "a scrambled Rubik's cube",
+            "a fully solved Rubik's cube with solid color faces",
+            "a partially scrambled Rubik's cube",
+            "a close-up of a 3x3 Rubik's cube on a table",
             "colorful plastic cube toy", "a 3x3 twisty puzzle",
             "sharp geometric edges", "high contrast colored squares", "symmetric pattern",
             "shadows indicating 3D depth", "plastic object with stickers",
             "a table corner", "cardboard box", "furniture edge",
-            "wooden surface", "indoor lighting", "close-up of patterned object"
+            "wooden surface", "indoor lighting", "close-up of patterned object",
+            "central object is a puzzle", "background is a plain surface"
         ]
         
         # Step 3: Cross-validation listener
@@ -74,9 +78,21 @@ class OmnidirectionalAgent:
         # Sample patches for evidence
         num_samples = min(12, len(self.memory))
         evidence_tokens = random.sample(self.memory, num_samples)
-        # Convert list of floats to tensor [N, 512]
+        
+        # Spatial weighting: Give higher weight to central patches for object identification
+        # Metadata contains 'position_normalized': {'x': norm_x, 'y': norm_y}
+        weights = []
+        for t in evidence_tokens:
+            pos = t.metadata.get('position_normalized', {'x': 0.5, 'y': 0.5})
+            # Simple Gaussian-like weight, higher for center (0.5, 0.5)
+            # Center is usually where the subject is in close-up photos
+            dist_sq = (pos['x'] - 0.5)**2 + (pos['y'] - 0.5)**2
+            weight = max(0.1, 1.0 - (dist_sq ** 0.5) * 1.5) 
+            weights.append(weight)
+            
         evidence_embeddings = torch.tensor([t.vector for t in evidence_tokens]).to(self.device).to(torch.float32)
-
+        weights_tensor = torch.tensor(weights).to(self.device).to(torch.float32)
+        
         for prompt_text in selected_prompts:
             # Curiosity boost
             curiosity_bonus = 0.2 if prompt_text not in self.seen_descriptions else 0.0
@@ -93,10 +109,12 @@ class OmnidirectionalAgent:
             
             # Similarities between text and each patch [batch=1, N_patches]
             similarities = torch.mm(text_emb, norm_evidence.T)[0]
-            clip_score = similarities.mean().item()
             
-            # Map clip score (typically small for patches) to a usable 0-1 range
-            # Base logic: 0.5 + clip_score * alpha
+            # Apply spatial weights
+            weighted_sim = (similarities * weights_tensor).sum() / weights_tensor.sum()
+            clip_score = weighted_sim.item()
+            
+            # Map clip score to a usable 0-1 range
             total_score = 0.5 + clip_score * 0.5 + curiosity_bonus + random.uniform(-0.05, 0.05)
             
             h_id = f"hyp_{uuid.uuid4().hex[:12]}"

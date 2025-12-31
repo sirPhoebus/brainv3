@@ -17,7 +17,8 @@ class Bridge:
             vector=segment.embedding,
             context_ref=segment.segment_id,
             timestamp=time.time(),
-            priority=1.0 # Default priority
+            priority=1.0, # Default priority
+            metadata=segment.metadata
         )
     
     @staticmethod

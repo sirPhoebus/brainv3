@@ -22,3 +22,4 @@ class AgentToken(BaseModel):
     context_ref: Optional[str] = Field(None, description="Reference back to the original VisualSegment or source")
     timestamp: float
     priority: float = 1.0
+    metadata: Dict[str, Any] = Field(default_factory=dict)

@@ -7,6 +7,8 @@ from AGI.src.bridge.schemas import AgentToken
 from AGI.src.swarm.comms import MessageBus
 from AGI.src.swarm.verifier import SwarmVerifier
 from AGI.src.config_loader import DEFAULT_CONFIG
+import torch
+import uuid
 
 logger = structlog.get_logger()
 
@@ -76,7 +78,64 @@ class Swarm:
                 logger.info("consensus_reached", step=i, top_score=self.global_hypotheses[0].score)
                 break
                 
-        return self._get_best_hypothesis()
+        # Final Refinement: Global alignment and Synthesis
+        final_h = await self._synthesize_final_hypothesis(input_tokens)
+        return final_h
+
+    async def _synthesize_final_hypothesis(self, all_tokens: List[AgentToken]) -> Hypothesis:
+        """
+        Synthesizes a final rich hypothesis by merging top consensus results
+        and calculating global CLIP alignment.
+        """
+        if not self.global_hypotheses:
+            return None
+
+        top_hyps = self.global_hypotheses[:3]
+        primary = top_hyps[0]
+        
+        # Combine descriptions if they are unique enough
+        additional_info = []
+        seen_words = set(primary.content.lower().split())
+        for h in top_hyps[1:]:
+            h_words = set(h.content.lower().split())
+            if len(h_words - seen_words) > 2: # Significant unique info
+                additional_info.append(h.content)
+                seen_words.update(h_words)
+        
+        final_content = primary.content
+        if additional_info:
+             # Very simple combination
+             final_content = f"{primary.content}, including {additional_info[0]}"
+
+        # Global alignment: CLIP similarity against MEAN of ALL patches
+        clip_model = self.agents[0].clip_model
+        clip_processor = self.agents[0].clip_processor
+        device = self.agents[0].device
+
+        if clip_model and clip_processor and all_tokens:
+            all_vectors = torch.tensor([t.vector for t in all_tokens]).to(device).to(torch.float32)
+            mean_emb = all_vectors.mean(dim=0, keepdim=True)
+            mean_emb = mean_emb / mean_emb.norm(dim=-1, keepdim=True)
+            
+            text_inputs = clip_processor(text=[final_content], return_tensors="pt", padding=True).to(device)
+            with torch.no_grad():
+                text_emb = clip_model.get_text_features(**text_inputs).to(torch.float32)
+            text_emb = text_emb / text_emb.norm(dim=-1, keepdim=True)
+            
+            global_sim = torch.mm(text_emb, mean_emb.T).item()
+            logger.info("global_alignment_check", score=global_sim, content=final_content)
+        
+        # Create synthesized result
+        final = Hypothesis(
+            hypothesis_id=f"final_{uuid.uuid4().hex[:8]}",
+            content=final_content,
+            score=primary.score,
+            agent_id="swarm_sync",
+            evidence=primary.evidence
+        )
+        # Add to global pool so it shows up in HITL
+        self.global_hypotheses.insert(0, final)
+        return final
 
     def _prune_hypotheses(self):
         """
