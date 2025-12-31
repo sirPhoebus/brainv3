@@ -33,19 +33,24 @@ class OmnidirectionalAgent:
         self.clip_model = clip_model
         self.clip_processor = clip_processor
         
-        # Expanded prompt bank with finer-grained specificity
+        # ARC-Specific Transformation Rule Bank
         self.prompt_bank = [
-            "a photo of a Rubik's cube", "a solved Rubik's cube", "a scrambled Rubik's cube",
-            "a fully solved Rubik's cube with solid color faces",
-            "a partially scrambled Rubik's cube",
-            "a close-up of a 3x3 Rubik's cube on a table",
-            "colorful plastic cube toy", "a 3x3 twisty puzzle",
-            "sharp geometric edges", "high contrast colored squares", "symmetric pattern",
-            "shadows indicating 3D depth", "plastic object with stickers",
-            "a table corner", "cardboard box", "furniture edge",
-            "wooden surface", "indoor lighting", "close-up of patterned object",
-            "central object is a puzzle", "background is a plain surface"
+            "identity: output grid is identical to input grid",
+            "reflection: mirror the top half of the input to the bottom output",
+            "reflection: mirror the left half of the input to the right output",
+            "color_fill: replace all 0-cells with the most frequent non-0 color",
+            "translation: shift all colored objects 3 cells to the right",
+            "pattern_continuation: continue the horizontal line until the edge",
+            "object_detection: detect the largest cluster and surround with a border",
+            "scaling: double the size of the input pattern in the output",
+            "color_swap: change all colors of type X to type Y",
+            "symmetry_completion: complete the partial symmetry around center",
+            "gravity: move all objects to the bottom of the grid",
+            "occlusion: hide objects that are behind the main central pattern"
         ]
+        
+        # New: task mode
+        self.mode = "arc_reasoning" # Default to ARC for now
         
         # Step 3: Cross-validation listener
         if self.bus:

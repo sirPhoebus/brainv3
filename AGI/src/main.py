@@ -21,7 +21,7 @@ async def main():
     
     # 2. Process Input
     import os
-    image_path = "AGI/examples/sample_image.png"
+    image_path = "AGI/examples/arc_tasks/task_user_composite.png"
     if not os.path.exists(image_path):
         logger.warning("sample_image_not_found_using_mock", path=image_path)
         from AGI.src.cortex.mock import MockCortex
@@ -39,13 +39,31 @@ async def main():
     
     # 4. Run Swarm reasoning
     logger.info("running_swarm_reasoning")
+    # For ARC, we use the composite image to discover the rule
     best_hypothesis = await swarm.run_consensus_loop(tokens)
     
-    # 5. HITL Review
+    # Example ARC Input Grid (the center object from task_user)
+    # This would typically come from the task JSON
+    sample_arc_input = [[0]*16 for _ in range(16)]
+    sample_arc_input[7] = [0, 0, 0, 0, 0, 0, 0, 3, 3, 3, 0, 0, 0, 0, 0, 0]
+
+    # 5. Apply Prediction
+    if best_hypothesis:
+        # If it's an ARC hypothesis, execute it
+        prediction = await swarm.apply_prediction(best_hypothesis, sample_arc_input)
+        logger.info("arc_prediction_generated", rule=best_hypothesis.content)
+        # In a real run, we might save the 'prediction' as a grid/image
+    
+    # 6. HITL Review
     hitl = HITLInterface()
     if swarm.global_hypotheses:
         reviewed = await hitl.review_hypotheses(swarm.global_hypotheses)
         best_hypothesis = reviewed[0] # Update best after review
+        
+        # 7. Distillation: Persist successful rule to memory
+        if best_hypothesis.score > 0.8:
+            logger.info("distilling_successful_rule", rule=best_hypothesis.content)
+            swarm.rule_memory.persist_rule(best_hypothesis.content)
     
     if best_hypothesis:
         logger.info("reasoning_complete", 

@@ -1,0 +1,4 @@
+{
+    "reflection: mirror the top half of the input to the bottom output, including pattern_continuation: continue the horizontal line until the edge": 1.0,
+    "reflection: mirror the left half of the input to the right output, including color_swap: change all colors of type X to type Y": 1.0
+}

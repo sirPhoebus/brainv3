@@ -5,8 +5,10 @@ from AGI.src.swarm.agent import OmnidirectionalAgent
 from AGI.src.swarm.schemas import Hypothesis
 from AGI.src.bridge.schemas import AgentToken
 from AGI.src.swarm.comms import MessageBus
-from AGI.src.swarm.verifier import SwarmVerifier
 from AGI.src.config_loader import DEFAULT_CONFIG
+from AGI.src.swarm.predictor import ARCPredictor
+from AGI.src.swarm.memory import RuleMemory
+from AGI.src.swarm.verifier import SwarmVerifier
 import torch
 import uuid
 
@@ -22,8 +24,21 @@ class Swarm:
         n_agents = num_agents or self.config.get("num_agents", 5)
         
         self.bus = MessageBus()
-        self.agents = [OmnidirectionalAgent(bus=self.bus, clip_model=clip_model, clip_processor=clip_processor) 
+        self.rule_memory = RuleMemory()
+        
+        # Pull rules from memory to bias agents
+        top_rules = self.rule_memory.get_top_rules()
+        self.agents = [OmnidirectionalAgent(bus=self.bus, 
+                                            clip_model=clip_model, 
+                                            clip_processor=clip_processor) 
                        for _ in range(n_agents)]
+        
+        # Inject known rules into agent prompt banks
+        for agent in self.agents:
+            for rule in top_rules:
+                if rule not in agent.prompt_bank:
+                    agent.prompt_bank.append(rule)
+
         self.global_hypotheses: List[Hypothesis] = []
         self.iteration_count = 0
         self.max_iterations = self.config.get("max_iterations", 20)
@@ -80,7 +95,20 @@ class Swarm:
                 
         # Final Refinement: Global alignment and Synthesis
         final_h = await self._synthesize_final_hypothesis(input_tokens)
+        
+        # ARC Specific: Prediction Execution
+        # We assume the last task context or a global state provides the grid
+        # For prototype, we'll try to apply the rule to a dummy input if needed
+        # but the real value is show it in HITL
         return final_h
+
+    async def apply_prediction(self, hypothesis: Hypothesis, input_grid: List[List[int]]) -> List[List[int]]:
+        """
+        Executes the rule in the hypothesis using the ARCPredictor.
+        """
+        logger.info("applying_transformation_rule", rule=hypothesis.content)
+        predicted = ARCPredictor.apply_rule(hypothesis.content, input_grid)
+        return predicted
 
     async def _synthesize_final_hypothesis(self, all_tokens: List[AgentToken]) -> Hypothesis:
         """
